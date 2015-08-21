@@ -1,14 +1,6 @@
 #include "../lib/oap.h"
-#include <termios.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <stdlib.h>
 #include <sys/signal.h>
-#include <sys/types.h>
-#include <string.h>
 
-#define BAUDRATE B57600
 #define _POSIX_SOURCE 1 /* POSIX compliant source */
 #define FALSE 0
 #define TRUE 1
@@ -28,16 +20,14 @@ void  INThandler(int sig)
 main(int argc, char **argv)
 {
 	int fd, c, res, retval, j, chksum;
-	struct termios oldtio,newtio;
-	char buf_r[255], buf_w[300], buf_r_hex[500], tmp_buf[255], buf[255];
-	char str[1300]="TEST: ";
-	int buf_len, readline_done;
+	char buf_r[255], buf_w[259], buf_r_hex[510];
+	char buf[259]; // max total message length could be 259
+	char str[3000];
+	int buf_len, read_len, readline_done;
 	fd_set fds;
 	struct timeval timeout;
 	timeout.tv_sec=0;
 	timeout.tv_usec=50;
-
-	WINDOW *cw;
 
 	line1_cmd_len=0;
 	line1_cmd_pos=0;
@@ -53,45 +43,13 @@ main(int argc, char **argv)
 
 	line1_devname=argv[1];
 	
+	fd=oap_open_sterm(line1_devname);
 
-	/* open the device to be non-blocking (read will return immediatly) */
-	fd = open(line1_devname, O_RDWR | O_NOCTTY | O_NONBLOCK);
-	if (fd <0) 
-	{
-		perror(line1_devname); 
-		return -1; 
-	}
-
-	cw=initscr(); 	/* init curses */
-	noecho();
-	cbreak();         // don't interrupt for user input
-	timeout(50);     // wait 500ms for key press
-
-    	immedok(cw, TRUE);
-    	scrollok(cw, TRUE);
+	// init curses screen
+	oap_initscr();
 
 	// replace CTRL-C handler
 	signal(SIGINT, INThandler);
-
-	/* allow the process to receive SIGIO */
-	fcntl(fd, F_SETOWN, getpid());
-	/* Make the file descriptor asynchronous (the manual page says only 
-	O_APPEND and O_NONBLOCK, will work with F_SETFL...) */
-	//fcntl(fd, F_SETFL, FASYNC);
-
-	tcgetattr(fd,&oldtio); /* save current port settings */
-	/* set new port settings for canonical input processing */
-//	newtio.c_cflag = BAUDRATE | CRTSCTS | CS8 | CLOCAL | CREAD;
-	newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
-//	newtio.c_iflag = IGNPAR | ICRNL;
-	newtio.c_iflag = IGNPAR ;
-	newtio.c_oflag = 0;
-	newtio.c_lflag &= !ICANON;
-	newtio.c_cc[VMIN]=1;
-	newtio.c_cc[VTIME]=0;
-	tcflush(fd, TCIFLUSH);
-	tcsetattr(fd,TCSANOW,&newtio);
-
 
 	printw("Start\n");
 	buf_len=0;
@@ -101,7 +59,7 @@ main(int argc, char **argv)
 		int tmp;
 
 		tmp=getch();
-		if(tmp!=ERR)
+		if(tmp!=ERR && strchr("0123456789abcdefABCDEF\n",tmp)!=NULL)
 		{
 			printw("%c",tmp);
 
@@ -111,14 +69,25 @@ main(int argc, char **argv)
 			}
 			else
 			{
-				buf_r_hex[buf_len]=tmp;
-				buf_len++;
+				if(buf_len==510)
+				{
+					oap_print_msg((char*)"ERROR: Cannot enter more then 510 hex characters (255 bytes)!");
+				}
+				else
+				{
+					buf_r_hex[buf_len]=tmp;
+					buf_len++;
+				}
 			}
 		}
 
 		if(readline_done)
 		{
-			buf_w[2]=0;
+			// setting control bytes
+			buf_w[0]=0xff;
+			buf_w[1]=0x55;
+			// initializing length of the message
+			read_len=0;
 			/* now need to convert hex string into walues */
 			for(j=0;j<buf_len;j+=2)
 			{
@@ -130,14 +99,12 @@ main(int argc, char **argv)
 				tmp[4]=0;
 				buf_r[j/2]=(char)(int)strtol(tmp,NULL, 0);
 				/* increase length of message to be sent */
-				buf_w[2]++;
+				read_len++;
 			}
-
-			// setting control bytes
-			buf_w[0]=0xff;
-			buf_w[1]=0x55;
-			chksum=buf_w[2];
-			for(j=0;j<buf_w[2];j++)
+			buf_w[2]=read_len;
+			
+			chksum=read_len;
+			for(j=0;j<read_len;j++)
 			{
 				buf_w[j+3]=buf_r[j];
 				chksum+=buf_r[j];
@@ -149,6 +116,7 @@ main(int argc, char **argv)
 			sprintf(str, "Line %d: MSG OUT: ", 1);
 			oap_hex_add_to_str(str, buf_w, j+4);
 			oap_print_msg(str);
+			oap_print_podmsg(1, buf_w);
 
 			retval=write(fd, buf_w, j+4);
 			if(retval<0)
@@ -174,7 +142,7 @@ main(int argc, char **argv)
 		if ( FD_ISSET(fd, &fds) ) 
 		{
 			int j;
-			res = read(fd,buf,255);
+			res = read(fd,buf,259);
 			buf[res]=0;
 			for(j=0;j<res;j++)
 			{
@@ -189,9 +157,9 @@ main(int argc, char **argv)
 
 		if(exit_flag) break;
 	}
-	/* restore old port settings */
-	tcsetattr(fd,TCSANOW,&oldtio);
-	endwin();
+
+	oap_close_sterm(fd);
+	oap_endwin();
 	return 0;
 }
 

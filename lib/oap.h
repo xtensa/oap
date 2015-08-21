@@ -1,26 +1,79 @@
-//#include <termios.h>
 #include <stdio.h>
-//#include <unistd.h>
-//#include <fcntl.h>
-//#include <sys/time.h>
-//#include <sys/signal.h>
-//#include <sys/types.h>
+#include <string.h>
 #include <sys/time.h>
 #include <curses.h>
+#include <fcntl.h>
+#include <termios.h>
 
+#define BAUDRATE B57600
 #define READ  1
 #define WRITE 2
 #define _DEBUG 0
 
 char line1_buf[300], line2_buf[300];
 char *line1_devname, *line2_devname;
-short int line1_cmd_len, line1_cmd_pos;
-short int line2_cmd_len, line2_cmd_pos;
+int line1_cmd_len, line1_cmd_pos;
+int line2_cmd_len, line2_cmd_pos;
+WINDOW *cw;
+struct termios oldtio,newtio;
+
+//#define POS_TIME 0
+//#define POS_LINE (POS_TIME+15)
+//#define POS_MODE (POS_LINE+6)
+//#define POS_CMD  (POS_MODE+7)
+
+void oap_initscr()
+{
+	cw=initscr();   /* init curses */
+	noecho();
+	cbreak();         // don't interrupt for user input
+	timeout(50);     // wait 500ms for key press
+	immedok(cw, TRUE);
+	scrollok(cw, TRUE);
+}
+
+void oap_endwin()
+{
+	endwin();
+}
+
+int oap_open_sterm(char *dev_name)
+{
+	int fd;
+	/* open the device to be non-blocking (read will return immediatly) */
+	fd = open(dev_name, O_RDWR | O_NOCTTY | O_NONBLOCK);
+	if (fd <0) 
+	{
+		perror(line1_devname); 
+		return -1; 
+	}
+
+	tcgetattr(fd,&oldtio); /* save current port settings */
+	/* set new port settings for canonical input processing */
+	newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
+	newtio.c_iflag = IGNPAR ;
+	newtio.c_oflag = 0;
+	newtio.c_lflag &= !ICANON;
+	newtio.c_cc[VMIN]=1;
+	newtio.c_cc[VTIME]=0;
+	tcflush(fd, TCIFLUSH);
+	tcsetattr(fd,TCSANOW,&newtio);
+
+	return fd;
+}
+
+
+void oap_close_sterm(int fd)
+{
+	/* restore old port settings */
+	tcsetattr(fd,TCSANOW,&oldtio);
+}
 
 
 void oap_hex_add_to_str(char *str, char *buf, int len)
 {
 	int j;
+	printw("LEN:(%d)",len);
 	for(j=0;j<len;j++)
 	{
 		sprintf(str,"%s %02X", str, (unsigned char)buf[j]);
@@ -30,6 +83,7 @@ void oap_hex_add_to_str(char *str, char *buf, int len)
 
 void oap_print_msg(char *str)
 {
+	int y, x;
 	struct timeval tp;
 	struct timezone tz;
 	gettimeofday(&tp, &tz);
@@ -38,13 +92,66 @@ void oap_print_msg(char *str)
 	// if we are using curses, then use printw, otherwise printf
 	if(baudrate()>0)
 	{
+		getyx(cw, y, x);
+		if(x!=0) printw("\n");
 		printw("%li: %s\n", ms, str);
+		
 	}
 	else
 	{
 		printf("%li: %s\n", ms, str);
 		fflush(stdout);
 	}
+}
+
+int oap_print_podmsg(int line, unsigned char *msg)
+{
+	int j, len=msg[2];
+	char tmp[5000];
+	struct timeval tp;
+	struct timezone tz;
+	gettimeofday(&tp, &tz);
+	long int ms = tp.tv_sec * 1000 + tp.tv_usec / 1000;
+
+	// if we are using curses, then use printw, otherwise printf
+	if(baudrate()>0)
+	{
+		//getyx(cw, y, x);
+	
+		sprintf(tmp, "%li  ", ms);
+		sprintf(tmp, "%s|  %d  ", tmp, line);
+		if(len>0) sprintf(tmp, "%s|  %02X  ", tmp, msg[3]); else sprintf(tmp, "%s|      ", tmp);
+		if(len>1) sprintf(tmp, "%s|  %02X ", tmp, msg[4]); else sprintf(tmp, "%s|      ", tmp);
+		if(len>2) sprintf(tmp, "%s%02X  ", tmp, msg[5]); else sprintf(tmp, "%s    ", tmp);
+		sprintf(tmp, "%s|  ", tmp);
+		// 3 bytes are for mode and command length
+		for(j=6;j<len+6-3;j++)
+		{
+			sprintf(tmp, "%s%02X ", tmp, msg[j]);
+		}
+		sprintf(tmp, "%s ", tmp);
+		if(len>3)
+		{
+			tmp[strlen(tmp)+1]=0;
+			tmp[strlen(tmp)]='[';
+			for(j=6;j<len+6-3;j++)
+			{
+				tmp[strlen(tmp)+1]=0;
+				tmp[strlen(tmp)]=msg[j];
+			}
+			tmp[strlen(tmp)+1]=0;
+			tmp[strlen(tmp)]=']';
+		}
+
+		printw("%s\n", tmp);
+	}
+	else
+	{
+		printf("ERROR: cannot print message, curses not initialized\n");
+		fflush(stdout);
+		return -1;
+	}
+	return 0;
 }
 
 int oap_calc_checksum(char *buf, int len)
@@ -62,7 +169,7 @@ int oap_calc_checksum(char *buf, int len)
 
 void oap_print_char(int line, int rw, char byte)
 {
-	char str[1300];
+	char str[1300]={0};
 
 	if(_DEBUG)
 	{
@@ -75,7 +182,7 @@ int oap_receive_byte(int line, unsigned char byte)
 {
 	char str[1200];
 	char *line_buf;
-	short int *line_cmd_pos, *line_cmd_len;
+	int *line_cmd_pos, *line_cmd_len;
 
 	oap_print_char(line, READ, byte);
 	
@@ -96,8 +203,8 @@ int oap_receive_byte(int line, unsigned char byte)
 
 	if(*line_cmd_pos == 0 && byte != 0xff)
 	{
-		sprintf(str, "Line %d: ERROR: first byte is not 0xFF", line);
-		oap_print_msg(str);
+		sprintf(str, "Line %d: ERROR: first byte is not 0xFF. Received 0x%02X", line, byte);
+//		oap_print_msg(str);
 		return -1;
 	}
 
@@ -140,9 +247,9 @@ int oap_receive_byte(int line, unsigned char byte)
 
 	}
 	
-	if(*line_cmd_len > 252 + 4)
+	if(*line_cmd_len > 259)
 	{
-		sprintf(str, "Line %d: ERROR: message len cannot exceed 252", line);
+		sprintf(str, "Line %d: ERROR: message len cannot exceed 259 bytes", line);
                 oap_print_msg(str);
                 return -1;
 	}
@@ -158,6 +265,8 @@ int oap_receive_byte(int line, unsigned char byte)
 		oap_hex_add_to_str(str, line_buf, *line_cmd_len);
 		oap_print_msg(str);
 
+		oap_print_podmsg(line, line_buf);
+
 		checksum=oap_calc_checksum(line_buf, *line_cmd_len);
 		if((unsigned char)line_buf[(*line_cmd_len)-1] != (unsigned char)checksum)
 		{
@@ -166,9 +275,9 @@ int oap_receive_byte(int line, unsigned char byte)
 		}
 		else
 		{
-			//sprintf(str, "Line %d: ERROR: checksum OK. Received: %d  Should be: %d", line, line_buf[*line_cmd_len-1], checksum);
 			if(_DEBUG)
 			{
+				//sprintf(str, "Line %d: ERROR: checksum OK. Received: %d  Should be: %d", line, line_buf[*line_cmd_len-1], checksum);
 				sprintf(str, "Line %d: Checksum OK", line);
 		                oap_print_msg(str);
 			}
