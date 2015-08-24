@@ -1,3 +1,9 @@
 tools/.oap_mitm.c.swp
 tools/a.out
+*.gch
+.Makefile.swp
+*.log
+*.o
+oap_console
+oap_mitm
 

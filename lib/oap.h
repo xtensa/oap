@@ -3,6 +3,8 @@
 #include <sys/time.h>
 #include <curses.h>
 #include <fcntl.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <termios.h>
 
 #define BAUDRATE B57600
@@ -14,8 +16,10 @@ char line1_buf[300], line2_buf[300];
 char *line1_devname, *line2_devname;
 int line1_cmd_len, line1_cmd_pos;
 int line2_cmd_len, line2_cmd_pos;
+int fd_log=0;
 WINDOW *cw;
 struct termios oldtio,newtio;
+char *logfile_name="mitm_out.log";
 
 //#define POS_TIME 0
 //#define POS_LINE (POS_TIME+15)
@@ -73,7 +77,7 @@ void oap_close_sterm(int fd)
 void oap_hex_add_to_str(char *str, char *buf, int len)
 {
 	int j;
-	printw("LEN:(%d)",len);
+	//printw("LEN:(%d)",len);
 	for(j=0;j<len;j++)
 	{
 		sprintf(str,"%s %02X", str, (unsigned char)buf[j]);
@@ -84,6 +88,7 @@ void oap_hex_add_to_str(char *str, char *buf, int len)
 void oap_print_msg(char *str)
 {
 	int y, x;
+	char tmp[5000];
 	struct timeval tp;
 	struct timezone tz;
 	gettimeofday(&tp, &tz);
@@ -102,6 +107,30 @@ void oap_print_msg(char *str)
 		printf("%li: %s\n", ms, str);
 		fflush(stdout);
 	}
+
+	// writing to log
+	if(logfile_name && fd_log)
+	{
+		sprintf(tmp, "%li: %s\n", ms, str);		
+		if(write(fd_log, tmp, strlen(tmp))<0)
+		{
+			if(baudrate()>0)
+			{
+				getyx(cw, y, x);
+				if(x!=0) printw("\n");
+				printw("ERROR: cannot write to log file\n");
+				
+			}
+			else
+			{
+				printf("ERROR: cannot write to log file\n");
+				fflush(stdout);
+			}
+
+		}
+	}
+	// just for compiler not to throw a worning
+	x=y;
 }
 
 int oap_print_podmsg(int line, unsigned char *msg)
@@ -113,44 +142,49 @@ int oap_print_podmsg(int line, unsigned char *msg)
 	gettimeofday(&tp, &tz);
 	long int ms = tp.tv_sec * 1000 + tp.tv_usec / 1000;
 
+	sprintf(tmp, "%li  ", ms);
+	sprintf(tmp, "%s|  L%d  ", tmp, line);
+	if(len>0) sprintf(tmp, "%s|  %02X  ", tmp, msg[3]); else sprintf(tmp, "%s|      ", tmp);
+	if(len>1) sprintf(tmp, "%s|  %02X ", tmp, msg[4]); else sprintf(tmp, "%s|      ", tmp);
+	if(len>2) sprintf(tmp, "%s%02X  ", tmp, msg[5]); else sprintf(tmp, "%s    ", tmp);
+	sprintf(tmp, "%s|  ", tmp);
+	// 3 bytes are for mode and command length
+	for(j=6;j<len+6-3;j++)
+	{
+		sprintf(tmp, "%s%02X ", tmp, msg[j]);
+	}
+	sprintf(tmp, "%s ", tmp);
+	if(len>3)
+	{
+		tmp[strlen(tmp)+1]=0;
+		tmp[strlen(tmp)]='[';
+		for(j=6;j<len+6-3;j++)
+		{
+			tmp[strlen(tmp)+1]=0;
+			tmp[strlen(tmp)]=msg[j];
+		}
+		tmp[strlen(tmp)+1]=0;
+		tmp[strlen(tmp)]=']';
+	}
+
 	// if we are using curses, then use printw, otherwise printf
 	if(baudrate()>0)
 	{
-		//getyx(cw, y, x);
 	
-		sprintf(tmp, "%li  ", ms);
-		sprintf(tmp, "%s|  %d  ", tmp, line);
-		if(len>0) sprintf(tmp, "%s|  %02X  ", tmp, msg[3]); else sprintf(tmp, "%s|      ", tmp);
-		if(len>1) sprintf(tmp, "%s|  %02X ", tmp, msg[4]); else sprintf(tmp, "%s|      ", tmp);
-		if(len>2) sprintf(tmp, "%s%02X  ", tmp, msg[5]); else sprintf(tmp, "%s    ", tmp);
-		sprintf(tmp, "%s|  ", tmp);
-		// 3 bytes are for mode and command length
-		for(j=6;j<len+6-3;j++)
-		{
-			sprintf(tmp, "%s%02X ", tmp, msg[j]);
-		}
-		sprintf(tmp, "%s ", tmp);
-		if(len>3)
-		{
-			tmp[strlen(tmp)+1]=0;
-			tmp[strlen(tmp)]='[';
-			for(j=6;j<len+6-3;j++)
-			{
-				tmp[strlen(tmp)+1]=0;
-				tmp[strlen(tmp)]=msg[j];
-			}
-			tmp[strlen(tmp)+1]=0;
-			tmp[strlen(tmp)]=']';
-		}
-
 		printw("%s\n", tmp);
 	}
 	else
 	{
-		printf("ERROR: cannot print message, curses not initialized\n");
-		fflush(stdout);
-		return -1;
+		printf("%s\n", tmp);
 	}
+	
+	// writing to log
+	if(logfile_name && fd_log)
+	{
+		sprintf(tmp, "%s\n", tmp);
+		write(fd_log, tmp, strlen(tmp));
+	}
+
 	return 0;
 }
 
@@ -169,15 +203,26 @@ int oap_calc_checksum(char *buf, int len)
 
 void oap_print_char(int line, int rw, char byte)
 {
-	char str[1300]={0};
+	char tmp[1300]={0};
 
 	if(_DEBUG)
 	{
-		sprintf(str,"Line %d: %s: %02X", line, (rw==READ?"RCV":"WRITE"), (unsigned char)byte);
-		oap_print_msg(str);
+		sprintf(tmp,"Line %d: %s: %02X", line, (rw==READ?"RCV":"WRITE"), (unsigned char)byte);
+		oap_print_msg(tmp);
 	}
+
+	sprintf(tmp, "DEBUG LINE %d: %02X\n", line, (unsigned char)byte);		
+	write(fd_log, tmp, strlen(tmp));
+
 }
 				
+
+/*
+ * Return values:
+ *     0 - byte received but msg in progress
+ *     1 - full message received
+ *    -1 - error occured
+ */
 int oap_receive_byte(int line, unsigned char byte)
 {
 	char str[1200];
@@ -204,7 +249,7 @@ int oap_receive_byte(int line, unsigned char byte)
 	if(*line_cmd_pos == 0 && byte != 0xff)
 	{
 		sprintf(str, "Line %d: ERROR: first byte is not 0xFF. Received 0x%02X", line, byte);
-//		oap_print_msg(str);
+		oap_print_msg(str);
 		return -1;
 	}
 
@@ -260,12 +305,12 @@ int oap_receive_byte(int line, unsigned char byte)
 
 	if(*line_cmd_pos == (*line_cmd_len))
 	{
-		int checksum;
-		sprintf(str, "Line %d: MSG  IN: ", line);
+		int checksum, msg_len;
+		sprintf(str, "Line %d: RAW MSG  IN: ", line);
 		oap_hex_add_to_str(str, line_buf, *line_cmd_len);
 		oap_print_msg(str);
 
-		oap_print_podmsg(line, line_buf);
+		oap_print_podmsg(line, (unsigned char *)line_buf);
 
 		checksum=oap_calc_checksum(line_buf, *line_cmd_len);
 		if((unsigned char)line_buf[(*line_cmd_len)-1] != (unsigned char)checksum)
@@ -283,8 +328,11 @@ int oap_receive_byte(int line, unsigned char byte)
 			}
 		}
 
+		msg_len=(*line_cmd_len);
 		(*line_cmd_pos) = 0;
 		(*line_cmd_len) = 0;
+
+		return msg_len;
 	}
 
 	return 0;

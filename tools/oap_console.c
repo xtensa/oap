@@ -17,9 +17,9 @@ void  INThandler(int sig)
 	exit_flag=TRUE;
 }
 
-main(int argc, char **argv)
+int main(int argc, char **argv)
 {
-	int fd, c, res, retval, j, chksum;
+	int fd, res, retval, j, chksum;
 	char buf_r[255], buf_w[259], buf_r_hex[510];
 	char buf[259]; // max total message length could be 259
 	char str[3000];
@@ -28,12 +28,6 @@ main(int argc, char **argv)
 	struct timeval timeout;
 	timeout.tv_sec=0;
 	timeout.tv_usec=50;
-
-	line1_cmd_len=0;
-	line1_cmd_pos=0;
-
-	line2_cmd_len=0;
-	line2_cmd_pos=0;
 
 	if(argc!=2)
 	{
@@ -56,6 +50,7 @@ main(int argc, char **argv)
 	readline_done=0;
 	while(1)
 	{
+
 		int tmp;
 
 		tmp=getch();
@@ -88,7 +83,7 @@ main(int argc, char **argv)
 			buf_w[1]=0x55;
 			// initializing length of the message
 			read_len=0;
-			/* now need to convert hex string into walues */
+			// now need to convert hex string into walues 
 			for(j=0;j<buf_len;j+=2)
 			{
 				char tmp[5];
@@ -98,7 +93,7 @@ main(int argc, char **argv)
 				tmp[3]=buf_r_hex[j+1];
 				tmp[4]=0;
 				buf_r[j/2]=(char)(int)strtol(tmp,NULL, 0);
-				/* increase length of message to be sent */
+				// increase length of message to be sent 
 				read_len++;
 			}
 			buf_w[2]=read_len;
@@ -113,10 +108,10 @@ main(int argc, char **argv)
 			chksum=0x100-chksum;
 			buf_w[j+3]=chksum;
 			
-			sprintf(str, "Line %d: MSG OUT: ", 1);
+			sprintf(str, "Line %d: RAW MSG OUT: ", 1);
 			oap_hex_add_to_str(str, buf_w, j+4);
 			oap_print_msg(str);
-			oap_print_podmsg(1, buf_w);
+			oap_print_podmsg(1, (unsigned char *)buf_w);
 
 			retval=write(fd, buf_w, j+4);
 			if(retval<0)
@@ -132,7 +127,8 @@ main(int argc, char **argv)
 			readline_done=0;
 			buf_len=0;
 		}
-		
+
+
 
 		FD_ZERO(&fds);
 		FD_SET(fd, &fds);  

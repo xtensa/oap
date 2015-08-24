@@ -1,13 +1,6 @@
 #include "../lib/oap.h"
-#include <termios.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/time.h>
 #include <sys/signal.h>
-#include <sys/types.h>
 
-#define BAUDRATE B57600
 #define _POSIX_SOURCE 1 /* POSIX compliant source */
 #define FALSE 0
 #define TRUE 1
@@ -15,107 +8,195 @@
 volatile int STOP=FALSE; 
 
 void signal_handler_IO (int status); /* definition of signal handler */
-int wait_flag=TRUE;   /* TRUE while no signal received */
+int exit_flag=FALSE;   /* TRUE while no signal received */
 
 /********************************************************************************/
 
-main(int argc, char **argv)
+void  INThandler(int sig)
 {
-	int fd,c, res;
-	struct termios oldtio,newtio;
-	struct sigaction saio;  /* definition of signal action */
-	char buf[255];
+	exit_flag=TRUE;
+}
 
-	line1_cmd_len=0;
-	line1_cmd_pos=0;
+int main(int argc, char **argv)
+{
+	int fd1, fd2, res, msg_len, fd_max;
+	char buf[259]; // max total message length could be 259
+	fd_set fds;
+	struct timeval timeout;
+	timeout.tv_sec=0;
+	timeout.tv_usec=50;
 
-	line2_cmd_len=0;
-	line2_cmd_pos=0;
-
-	if(argc!=2)
+	if(argc!=3)
 	{
-		printf("Usage: %s <dev1>\n",argv[0]);
+		printf("Usage: %s <tty_input_dev> <tty_output_dev>\n",argv[0]);
 		return -2;
 	}
 
 	line1_devname=argv[1];
+	line2_devname=argv[2];
 	
+	fd1=oap_open_sterm(line1_devname);
+	fd2=oap_open_sterm(line2_devname);
 
-	/* open the device to be non-blocking (read will return immediatly) */
-	fd = open(line1_devname, O_RDWR | O_NOCTTY | O_NONBLOCK);
-	if (fd <0) 
+	if(fd1<0)
 	{
-		perror(line1_devname); 
-		return -1; 
+		printf("ERROR: cannot open tty device %s\n", line1_devname);
 	}
 
-	/* install the signal handler before making the device asynchronous */
-	saio.sa_handler = signal_handler_IO;
-	
-	/* saio.sa_mask = 0; */
-	/* Signals blocked during the execution of the handler. */
-	sigemptyset(&saio.sa_mask);
-	sigaddset(&saio.sa_mask, SIGINT);
-
-	saio.sa_flags = 0;
-	saio.sa_restorer = NULL;
-	sigaction(SIGIO,&saio,NULL);
-
-	/* allow the process to receive SIGIO */
-	fcntl(fd, F_SETOWN, getpid());
-	/* Make the file descriptor asynchronous (the manual page says only 
-	O_APPEND and O_NONBLOCK, will work with F_SETFL...) */
-	fcntl(fd, F_SETFL, FASYNC);
-
-	tcgetattr(fd,&oldtio); /* save current port settings */
-	/* set new port settings for canonical input processing */
-	newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
-	newtio.c_iflag = IGNPAR ;
-	newtio.c_oflag = 0;
-	newtio.c_lflag &= !ICANON;
-	newtio.c_cc[VMIN]=1;
-	newtio.c_cc[VTIME]=0;
-	tcflush(fd, TCIFLUSH);
-	tcsetattr(fd,TCSANOW,&newtio);
-
-	/* loop while waiting for input. normally we would do something
-	useful here */ 
-	while (STOP==FALSE) 
+	if(fd2<0)
 	{
-//		printf(".");
-//		fflush(stdout);
-		usleep(100000);
+		printf("ERROR: cannot open tty device %s\n", line2_devname);
+	}
 
-		/* after receiving SIGIO, wait_flag = FALSE, input is available
-		and can be read */
-		if (wait_flag==FALSE) 
+
+	fd_log=open(logfile_name, O_CREAT | O_RDWR | O_APPEND, S_IRWXU);
+	if(fd_log<0)
+	{
+		printf("ERROR: cannot open log file %s\n", logfile_name);
+	}
+
+	if(fd1<0 || fd2<0 || fd_log<0) return -1;
+
+
+	// init curses screen
+//	oap_initscr();
+
+	// replace CTRL-C handler
+	signal(SIGINT, INThandler);
+
+	while(1)
+	{
+		int read_sth=0;
+/*
+		int tmp;
+
+		tmp=getch();
+		if(tmp!=ERR && strchr("0123456789abcdefABCDEF\n",tmp)!=NULL)
 		{
-			int j; 
-			wait_flag = TRUE; /* wait for new input */
-			res = read(fd,buf,255);
+			printw("%c",tmp);
+
+			if(tmp=='\n')
+			{
+				readline_done=1;
+			}
+			else
+			{
+				if(buf_len==510)
+				{
+					oap_print_msg((char*)"ERROR: Cannot enter more then 510 hex characters (255 bytes)!");
+				}
+				else
+				{
+					buf_r_hex[buf_len]=tmp;
+					buf_len++;
+				}
+			}
+		}
+
+		if(readline_done)
+		{
+			// setting control bytes
+			buf_w[0]=0xff;
+			buf_w[1]=0x55;
+			// initializing length of the message
+			read_len=0;
+			// now need to convert hex string into walues 
+			for(j=0;j<buf_len;j+=2)
+			{
+				char tmp[5];
+				tmp[0]='0';
+				tmp[1]='x';
+				tmp[2]=buf_r_hex[j];
+				tmp[3]=buf_r_hex[j+1];
+				tmp[4]=0;
+				buf_r[j/2]=(char)(int)strtol(tmp,NULL, 0);
+				// increase length of message to be sent 
+				read_len++;
+			}
+			buf_w[2]=read_len;
+			
+			chksum=read_len;
+			for(j=0;j<read_len;j++)
+			{
+				buf_w[j+3]=buf_r[j];
+				chksum+=buf_r[j];
+			}
+			chksum&=0xff;
+			chksum=0x100-chksum;
+			buf_w[j+3]=chksum;
+			
+			sprintf(str, "Line %d: RAW MSG OUT: ", 1);
+			oap_hex_add_to_str(str, buf_w, j+4);
+			oap_print_msg(str);
+			oap_print_podmsg(1, buf_w);
+
+			retval=write(fd1, buf_w, j+4);
+			if(retval<0)
+			{
+				oap_print_msg((char*)"ERROR: cannot write to serial terminal");
+			}
+
+			if(_DEBUG)
+			{
+				printw("Status: %d bytes sent\n", retval);
+			}
+
+			readline_done=0;
+			buf_len=0;
+		}
+		
+*/
+		FD_ZERO(&fds);
+		FD_SET(fd1, &fds);  
+		FD_SET(fd2, &fds);
+		if(fd1>fd2) fd_max=fd1; else fd_max=fd2;
+		res = select(fd_max+1, &fds, NULL, NULL, &timeout);  
+	 
+		if ( FD_ISSET(fd1, &fds) ) 
+		{
+			int j;
+			res = read(fd1,buf,259);
 			buf[res]=0;
 			for(j=0;j<res;j++)
 			{
-				oap_receive_byte(1, buf[j]);
+				msg_len=oap_receive_byte(1, buf[j]);
+				if(msg_len>0) // full msg received
+				{
+					write(fd2, line1_buf, msg_len);
+				}
 			}
-	//		if (res==1) STOP=TRUE; /* stop loop if only a CR was input */
+			read_sth=1;
 		}
+
+		if ( FD_ISSET(fd2, &fds) ) 
+		{
+			int j;
+			res = read(fd2,buf,259);
+			buf[res]=0;
+			for(j=0;j<res;j++)
+			{
+				msg_len=oap_receive_byte(2, buf[j]);
+				if(msg_len>0) // full msg received
+				{
+					write(fd1, line2_buf, msg_len);
+				}
+			}
+			read_sth=1;
+		}
+
+		if(!read_sth)
+		{
+			usleep(1000);
+		}
+
+		if(exit_flag) break;
 	}
-	/* restore old port settings */
-	tcsetattr(fd,TCSANOW,&oldtio);
 
+	oap_close_sterm(fd1);
+	oap_close_sterm(fd2);
+	close(fd_log);
+//	oap_endwin();
 	return 0;
-}
-
-/***************************************************************************
-* signal handler. sets wait_flag to FALSE, to indicate above loop that *
-* characters have been received.      *
-***************************************************************************/
-
-void signal_handler_IO (int status)
-{
-/*	printf("received SIGIO signal.\n");
-*/	wait_flag = FALSE;
 }
 
 
