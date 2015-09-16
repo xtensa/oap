@@ -162,7 +162,22 @@ int main(int argc, char **argv)
 				msg_len=oap_receive_byte(1, buf[j]);
 				if(msg_len>0) // full msg received
 				{
-					write(fd2, line1_buf, msg_len);
+					if(write(fd2, line1_buf, msg_len)<0)
+					{
+						if(baudrate()>0)
+						{
+							int x,y;
+							getyx(cw, y, x);
+							if(x!=0) printw("\n");
+							printw("ERROR: cannot write to line 1\n");
+							x=y;		
+						}
+						else
+						{
+							printf("ERROR: cannot write to line 1\n");
+							fflush(stdout);
+						}
+					}
 				}
 			}
 			read_sth=1;
@@ -178,7 +193,22 @@ int main(int argc, char **argv)
 				msg_len=oap_receive_byte(2, buf[j]);
 				if(msg_len>0) // full msg received
 				{
-					write(fd1, line2_buf, msg_len);
+					if(write(fd1, line2_buf, msg_len)<0)
+					{
+						if(baudrate()>0)
+						{
+							int x,y;
+							getyx(cw, y, x);
+							if(x!=0) printw("\n");
+							printw("ERROR: cannot write to line 2\n");
+							x=y;		
+						}
+						else
+						{
+							printf("ERROR: cannot write to line 2\n");
+							fflush(stdout);
+						}
+					}
 				}
 			}
 			read_sth=1;

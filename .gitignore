@@ -6,4 +6,5 @@ tools/a.out
 *.o
 oap_console
 oap_mitm
+tools/.swp
 
