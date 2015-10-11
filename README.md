@@ -1,9 +1,9 @@
 ## OAP - iPod "transport" protocol 
 
 OAP is an implementation of iPod "transport" protocol used in old iPod 30-pin connectors. It was created purely for "scientific" purposes, to better understand the protocol and to support debugging and testing for my other android app that simulates iPod communication on android. This repository contains 3 pieces:
-1. OAP library
-2. OAP console tool
-3. OAP MITM (Man In The Middle) tool
+ 1. OAP library
+ 2. OAP console tool
+ 3. OAP MITM (Man In The Middle) tool
 
 ## OAP library
 
