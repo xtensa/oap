@@ -216,7 +216,7 @@ int main(int argc, char **argv)
 
 		if(!read_sth)
 		{
-			usleep(1000);
+			usleep(10);
 		}
 
 		if(exit_flag) break;

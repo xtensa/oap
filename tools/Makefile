@@ -7,17 +7,30 @@ CFLAGS         = -c -g -Wall $(OPTIMIZE) ${DEFS}
 LDFLAGS        = -lcurses
 
 
-all: oap_console oap_mitm
+all: oap_console oap_mitm oap_unit_testing
 	@cat /dev/null 
 
 
 oap_console.c: ../lib/oap.h 
 	@cat /dev/null 
 
-oap_console.o: oap_console.c 
+oap_console.o: oap_console.c ../lib/oap.h
+	rm ../lib/oap.h.gch
 	$(CC) $(CFLAGS) $^ $(LIBS)
 
 oap_console: oap_console.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+
+
+oap_unit_testing.c: ../lib/oap.h
+	@cat /dev/null 
+
+oap_unit_testing.o: oap_unit_testing.c ../lib/oap.h 
+	rm ../lib/oap.h.gch
+	$(CC) $(CFLAGS) $^ $(LIBS)
+
+oap_unit_testing: oap_unit_testing.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 
@@ -27,7 +40,8 @@ oap_console: oap_console.o
 oap_mitm.c: ../lib/oap.h 
 	@cat /dev/null 
 
-oap_mitm.o: oap_mitm.c 
+oap_mitm.o: oap_mitm.c ../lib/oap.h
+	rm ../lib/oap.h.gch
 	$(CC) $(CFLAGS) $^ $(LIBS)
 
 oap_mitm: oap_mitm.o
@@ -37,4 +51,4 @@ oap_mitm: oap_mitm.o
 
 
 clean:
-	rm -rf *.o oap_console oap_mitm
+	rm -rf *.o oap_console oap_mitm oap_unit_testing

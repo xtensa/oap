@@ -29,12 +29,14 @@ int main(int argc, char **argv)
 	struct timeval timeout;
 	timeout.tv_sec=0;
 	timeout.tv_usec=50;
-
+/*
 	if(argc!=2)
 	{
 		printf("Usage: %s <dev1>\n",argv[0]);
 		return -2;
 	}
+*/
+
 
 	fd_log=open(logfile_name, O_CREAT | O_RDWR | O_APPEND, S_IRWXU);
 	if(fd_log<0)
@@ -145,15 +147,17 @@ int main(int argc, char **argv)
 			sprintf(str, "Line %d: RAW MSG OUT: ", 1);
 			oap_hex_add_to_str(str, buf_w, j+1+pos_shift);
 			oap_print_msg(str);
-			oap_print_podmsg(1, (unsigned char *)buf_w, read_len,ext_mode);
+			if(_DEBUG)
+				oap_print_podmsg(1, (unsigned char *)buf_w, read_len,ext_mode);
 
 			retval=write(fd, buf_w, j+1+pos_shift);
 			if(retval<0)
 			{
 				oap_print_msg((char*)"ERROR: cannot write to serial terminal");
 			}
+//	usleep(300);
 
-			if(_DEBUG)
+			if(_DEBUG>1)
 			{
 				printw("Status: %d bytes sent\n", retval);
 			}
@@ -183,7 +187,7 @@ int main(int argc, char **argv)
 		}
 		else
 		{
-			usleep(1000);
+			usleep(300);
 		}
 
 		if(exit_flag) break;

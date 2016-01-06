@@ -11,7 +11,13 @@
 #define BAUDRATE B57600
 #define READ  1
 #define WRITE 2
-#define _DEBUG 3
+
+// DEBUG:
+// 	0 - turned off
+// 	1 - info
+// 	2 - debug
+// 	3 - more debug
+#define _DEBUG 0 
 
 char line1_buf[65026], line2_buf[65026],ext_image_buf[5];
 char *line1_devname, *line2_devname;
@@ -22,6 +28,7 @@ int line1_is_extended_image=0, line2_is_extended_image=0;
 int line1_ext_pos=2, line2_ext_pos=2;
 
 int fd_log=0;
+int use_ncurses=0;
 WINDOW *cw;
 struct termios oldtio,newtio;
 char *logfile_name="mitm_out.log";
@@ -39,6 +46,7 @@ void oap_initscr()
 	timeout(50);     // wait 500ms for key press
 	immedok(cw, TRUE);
 	scrollok(cw, TRUE);
+	use_ncurses=1;
 }
 
 void oap_endwin()
@@ -107,7 +115,7 @@ void oap_print_msg(char *str)
 	long int ms = tp.tv_sec * 1000 + tp.tv_usec / 1000;
 
 	// if we are using curses, then use printw, otherwise printf
-	if(baudrate()>0)
+	if(use_ncurses && baudrate()>0)
 	{
 		getyx(cw, y, x);
 		if(x!=0) printw("\n");
@@ -126,7 +134,7 @@ void oap_print_msg(char *str)
 		sprintf(tmp, "%li: %s\n", ms, str);		
 		if(write(fd_log, tmp, strlen(tmp))<0)
 		{
-			if(baudrate()>0)
+			if(use_ncurses && baudrate()>0)
 			{
 				getyx(cw, y, x);
 				if(x!=0) printw("\n");
@@ -148,11 +156,17 @@ void oap_print_msg(char *str)
 int oap_print_podmsg(int line, unsigned char *msg, int len, int is_ext)
 {
 	int j, pos_shift=0;
-	char tmp1[5000], tmp2[5000];
+	char tmp1[5000]={0}, tmp2[5000]={0};
 	struct timeval tp;
 	struct timezone tz;
 	gettimeofday(&tp, &tz);
 	long int ms = tp.tv_sec * 1000 + tp.tv_usec / 1000;
+
+	for(j=0;j<5000;j++)
+	{
+		tmp1[j]=0;
+		tmp2[j]=0;
+	}
 
 	 
 	// length is received as parameter
@@ -180,7 +194,7 @@ int oap_print_podmsg(int line, unsigned char *msg, int len, int is_ext)
 	{
 		tmp1[strlen(tmp1)+1]=0;
 		tmp1[strlen(tmp1)]='[';
-		for(j=6;j<len+6-3;j++)
+		for(j=6;j<len+6-3;j++) if(msg[j+pos_shift]!='\n' && msg[j+pos_shift]!='\r' && msg[j+pos_shift]!=0)
 		{
 			tmp1[strlen(tmp1)+1]=0;
 			tmp1[strlen(tmp1)]=msg[j+pos_shift];
@@ -189,8 +203,7 @@ int oap_print_podmsg(int line, unsigned char *msg, int len, int is_ext)
 		tmp1[strlen(tmp1)]=']';
 	}
 
-	// if we are using curses, then use printw, otherwise printf
-	if(baudrate()>0)
+	if(use_ncurses && baudrate()>0)
 	{
 	
 		printw("%s\n", tmp1);
@@ -206,7 +219,7 @@ int oap_print_podmsg(int line, unsigned char *msg, int len, int is_ext)
 		sprintf(tmp2, "%s\n", tmp1);
 		if(write(fd_log, tmp2, strlen(tmp2))<0)
 		{
-			if(baudrate()>0)
+			if(use_ncurses && baudrate()>0)
 			{
 				int x,y;
 				getyx(cw, y, x);
@@ -243,7 +256,7 @@ void oap_print_char(int line, int rw, char byte)
 {
 	char tmp[1300]={0};
 
-	if(_DEBUG)
+	if(_DEBUG>1)
 	{
 		sprintf(tmp,"Line %d: %s: %02X", line, (rw==READ?"RCV":"WRITE"), (unsigned char)byte);
 		oap_print_msg(tmp);
@@ -258,7 +271,7 @@ void oap_print_char(int line, int rw, char byte)
 /*
  * Return values:
  *     0 - byte received but msg in progress
- *     1 - full message received
+ *    >0 - full message received
  *    -1 - error occured
  */
 int oap_receive_byte(int line, unsigned char byte)
@@ -267,7 +280,8 @@ int oap_receive_byte(int line, unsigned char byte)
 	char *line_buf;
 	int *line_cmd_pos, *line_cmd_len, *line_ext_pos, *is_extended_image;
 
-	oap_print_char(line, READ, byte);
+	if(_DEBUG)
+		oap_print_char(line, READ, byte);
 	
 	if(line==1)
 	{
@@ -299,7 +313,7 @@ int oap_receive_byte(int line, unsigned char byte)
 		 */
 		(*line_cmd_len) = byte + 4; 
 
-		if(_DEBUG)
+		if(_DEBUG>2)
 		{
 			sprintf(str, "Line %d: msg LEN: %d TOTAL LEN: %d", line, byte, (*line_cmd_len));
         	        oap_print_msg(str);
@@ -355,8 +369,11 @@ int oap_receive_byte(int line, unsigned char byte)
 			line_buf[6] = 0x00;
 			line_buf[7] = 0x32;
 
-			sprintf(str, "Line %d: Extended image message detected!!!", line);
-			oap_print_msg(str);
+			if(_DEBUG>1)
+			{
+				sprintf(str, "Line %d: Extended image message detected!!!", line);
+				oap_print_msg(str);
+			}
 			// from now and on message will be treated normally
 		}
 	
@@ -423,21 +440,28 @@ int oap_receive_byte(int line, unsigned char byte)
 	if(*line_cmd_pos == (*line_cmd_len))
 	{
 		int checksum, msg_len;
-		sprintf(str, "Line %d: RAW MSG  IN: ", line);
-		oap_hex_add_to_str(str, line_buf, *line_cmd_len);
-		oap_print_msg(str);
+		if(_DEBUG)
+		{
+			sprintf(str, "Line %d: RAW MSG  IN: ", line);
+			oap_hex_add_to_str(str, line_buf, *line_cmd_len);
+			oap_print_msg(str);
+		
+			oap_print_podmsg(line, (unsigned char *)line_buf, (*line_cmd_len)-4-((*is_extended_image)?2:0), *is_extended_image);
+		}
 
-		oap_print_podmsg(line, (unsigned char *)line_buf, (*line_cmd_len)-4-((*is_extended_image)?2:0), *is_extended_image);
 
 		checksum=oap_calc_checksum(line_buf, *line_cmd_len);
 		if((unsigned char)line_buf[(*line_cmd_len)-1] != (unsigned char)checksum)
 		{
-			sprintf(str, "Line %d: ERROR: checksum error. Received: %02X  Should be: %02X", line, (unsigned char)line_buf[*line_cmd_len-1], (unsigned char)checksum);
-	                oap_print_msg(str);
+			if(_DEBUG>1)
+			{
+				sprintf(str, "Line %d: ERROR: checksum error. Received: %02X  Should be: %02X", line, (unsigned char)line_buf[*line_cmd_len-1], (unsigned char)checksum);
+	                	oap_print_msg(str);
+			}
 		}
 		else
 		{
-			if(_DEBUG)
+			if(_DEBUG>1)
 			{
 				//sprintf(str, "Line %d: ERROR: checksum OK. Received: %d  Should be: %d", line, line_buf[*line_cmd_len-1], checksum);
 				sprintf(str, "Line %d: Checksum OK", line);
