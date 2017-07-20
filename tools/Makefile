@@ -15,8 +15,9 @@ oap_console.c: ../lib/oap.h
 	@cat /dev/null 
 
 oap_console.o: oap_console.c ../lib/oap.h
+	touch ../lib/oap.h.gch
 	rm ../lib/oap.h.gch
-	$(CC) $(CFLAGS) $^ $(LIBS)
+	$(CC) -D _DEBUG=1 $(CFLAGS) $^ $(LIBS)
 
 oap_console: oap_console.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
@@ -27,8 +28,9 @@ oap_unit_testing.c: ../lib/oap.h
 	@cat /dev/null 
 
 oap_unit_testing.o: oap_unit_testing.c ../lib/oap.h 
+	touch ../lib/oap.h.gch
 	rm ../lib/oap.h.gch
-	$(CC) $(CFLAGS) $^ $(LIBS)
+	$(CC) -D _DEBUG=0 $(CFLAGS) $^ $(LIBS)
 
 oap_unit_testing: oap_unit_testing.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
@@ -41,8 +43,9 @@ oap_mitm.c: ../lib/oap.h
 	@cat /dev/null 
 
 oap_mitm.o: oap_mitm.c ../lib/oap.h
+	touch ../lib/oap.h.gch
 	rm ../lib/oap.h.gch
-	$(CC) $(CFLAGS) $^ $(LIBS)
+	$(CC) -D _DEBUG=0 $(CFLAGS) $^ $(LIBS)
 
 oap_mitm: oap_mitm.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
