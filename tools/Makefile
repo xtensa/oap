@@ -15,7 +15,7 @@ oap_console.c: ../lib/oap.h
 	@cat /dev/null 
 
 oap_console.o: oap_console.c ../lib/oap.h
-	[ -f ../lib/oap.h.gch ] && rm ../lib/oap.h.gch
+	[ -f ../lib/oap.h.gch ] && rm ../lib/oap.h.gch || echo -n
 	$(CC) $(CFLAGS) $^ $(LIBS)
 
 oap_console: oap_console.o
@@ -27,7 +27,7 @@ oap_unit_testing.c: ../lib/oap.h
 	@cat /dev/null 
 
 oap_unit_testing.o: oap_unit_testing.c ../lib/oap.h 
-	[ -f ../lib/oap.h.gch ] && rm ../lib/oap.h.gch
+	[ -f ../lib/oap.h.gch ] && rm ../lib/oap.h.gch || echo -n
 	$(CC) $(CFLAGS) $^ $(LIBS)
 
 oap_unit_testing: oap_unit_testing.o
