@@ -19,12 +19,12 @@ void  INThandler(int sig)
 
 int main(int argc, char **argv)
 {
-	int fd, res, retval, j, chksum;
+	int fd, res, retval, j, chksum=0;
 	char buf_r[255], buf_w[261], buf_r_hex[510];
 	char buf[259]; // max total message length could be 259
 	char str[3000];
 	char logfile_name[]="oap_console.log";
-	int buf_len, read_len, readline_done, ext_mode=0;
+	int buf_len, read_len, readline_done, ext_mode=0, raw_input=0;
 	fd_set fds;
 	struct timeval timeout;
 	timeout.tv_sec=0;
@@ -66,13 +66,17 @@ int main(int argc, char **argv)
 		int tmp;
 
 		tmp=getch();
-		if(tmp!=ERR && strchr("0123456789abcdefABCDEF\n",tmp)!=NULL)
+		if(tmp!=ERR && strchr("#0123456789abcdefABCDEF\n",tmp)!=NULL)
 		{
 			printw("%c",tmp);
 
 			if(tmp=='\n')
 			{
 				readline_done=1;
+			}
+			else if(tmp=='#')
+			{
+				raw_input=1;
 			}
 			else
 			{
@@ -99,14 +103,17 @@ int main(int argc, char **argv)
 
 		if(readline_done)
 		{
-			int pos_shift=3;
+			int pos_shift=3, msg_len;
 			// setting control bytes
-			buf_w[0]=0xff;
-			buf_w[1]=0x55;
+			if(!raw_input)
+			{
+				buf_w[0]=0xff;
+				buf_w[1]=0x55;
+			}
 
 			// initializing length of the message
 			read_len=0;
-			// now need to convert hex string into walues 
+			// now need to convert hex string into values 
 			for(j=0;j<buf_len;j+=2)
 			{
 				char tmp[5];
@@ -119,38 +126,55 @@ int main(int argc, char **argv)
 				// increase length of message to be sent 
 				read_len++;
 			}
-			
-			if(ext_mode)
-			{
-				buf_w[2]=0x00;
-				buf_w[3]=(read_len/0xff);
-				buf_w[4]=read_len;
-				pos_shift=5;
-				chksum=buf_w[3]+buf_w[4];
+		
+			if(!raw_input)
+			{	
+				if(ext_mode)
+				{
+					buf_w[2]=0x00;
+					buf_w[3]=(read_len/0xff);
+					buf_w[4]=read_len;
+					pos_shift=5;
+					chksum=buf_w[3]+buf_w[4];
+				}
+				else
+				{
+					buf_w[2]=read_len;
+					pos_shift=3;
+					chksum=read_len;
+				}
 			}
 			else
 			{
-				buf_w[2]=read_len;
-				pos_shift=3;
-				chksum=read_len;
+				pos_shift=0;
 			}
-			
+				
 			for(j=0;j<read_len;j++)
 			{
 				buf_w[j+pos_shift]=buf_r[j];
 				chksum+=buf_r[j];
 			}
-			chksum&=0xff;
-			chksum=0x100-chksum;
-			buf_w[j+pos_shift]=chksum;
-			
+
+			if(!raw_input)
+			{
+				chksum&=0xff;
+				chksum=0x100-chksum;
+				buf_w[j+pos_shift]=chksum;
+				msg_len=j+1+pos_shift;
+			}
+			else
+				msg_len=j;
+
+
 			sprintf(str, "Line %d: RAW MSG OUT: ", 1);
-			oap_hex_add_to_str(str, buf_w, j+1+pos_shift);
+			oap_hex_add_to_str(str, buf_w, msg_len);
 			oap_print_msg(str);
 			if(_DEBUG)
 				oap_print_podmsg(1, (unsigned char *)buf_w, read_len,ext_mode);
 
-			retval=write(fd, buf_w, j+1+pos_shift);
+
+			retval=write(fd, buf_w, msg_len);
+			
 			if(retval<0)
 			{
 				oap_print_msg((char*)"ERROR: cannot write to serial terminal");
@@ -165,6 +189,8 @@ int main(int argc, char **argv)
 			ext_mode=0;
 			readline_done=0;
 			buf_len=0;
+				
+			raw_input=0;
 		}
 
 

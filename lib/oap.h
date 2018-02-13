@@ -17,7 +17,7 @@
 // 	1 - info
 // 	2 - debug
 // 	3 - more debug
-#define _DEBUG 0 
+#define _DEBUG 2 
 
 char line1_buf[65026], line2_buf[65026],ext_image_buf[5];
 char *line1_devname, *line2_devname;
